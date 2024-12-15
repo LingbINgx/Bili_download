@@ -2,18 +2,12 @@ mod qrcode_login;
 use crate::qrcode_login::login_qrcode;
 use reqwest::Client;
 use std::io;
+mod down;
 mod refresh_cookie;
 
-#[tokio::main]
-async fn main() {
+async fn init() {
     // 调用二维码登录函数
     let client: Client = reqwest::Client::new();
-
-    // if login_qrcode(&client).await {
-    //     println!("Login successful");
-    // } else {
-    //     println!("Login failed");
-    // }
 
     match refresh_cookie::refresh_cookie(&client).await {
         Ok(flag) => {
@@ -30,6 +24,12 @@ async fn main() {
         }
         Err(e) => eprintln!("Error occurred: {}", e),
     }
+}
+
+#[tokio::main]
+async fn main() {
+    init().await;
+    down::download_bangumi("1183104", "").await.unwrap();
 
     // 阻止终端自动关闭
     println!("\nPress Enter to exit...");

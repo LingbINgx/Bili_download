@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Write;
 use std::process::Command;
+use urlencoding::encode;
 
 /// 渲染SVG到PNG
 fn render_svg_to_png(svg_data: &str, output_path: &str) -> Result<()> {
@@ -63,7 +64,6 @@ async fn qrcode_pull(client: &Client, qrcode_key: &str) -> Result<bool, reqwest:
     let mut flag: bool = false;
     let url = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll";
     let value = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-
     let mut headers: reqwest::header::HeaderMap = reqwest::header::HeaderMap::new();
     headers.insert("User-Agent", HeaderValue::from_static(value));
     headers.insert(
@@ -73,6 +73,7 @@ async fn qrcode_pull(client: &Client, qrcode_key: &str) -> Result<bool, reqwest:
     let mut params: HashMap<&str, &str> = HashMap::new();
     params.insert("qrcode_key", qrcode_key);
     let cookie: Option<String>;
+    let mut count = 0;
     loop {
         let resp: String = client
             .get(url)
@@ -86,6 +87,7 @@ async fn qrcode_pull(client: &Client, qrcode_key: &str) -> Result<bool, reqwest:
         let (code1, url, refresh_token, code2, message) = wait_for_login(resp);
         if code1 == 0 {
             if code2 == 0 {
+                //登录成功
                 std::fs::remove_file("output.png").unwrap();
                 let result = format!("{}&refresh_token={}", url, refresh_token);
                 cookie = Some(result);
@@ -100,6 +102,14 @@ async fn qrcode_pull(client: &Client, qrcode_key: &str) -> Result<bool, reqwest:
             break;
         }
         std::thread::sleep(std::time::Duration::from_secs_f64(3.0));
+        count += 3;
+        if count >= 180 {
+            // 3分钟超时
+            std::fs::remove_file("output.png").unwrap();
+            println!("Timeout");
+            cookie = None;
+            break;
+        }
     }
     if let Some(cookie) = &cookie {
         match save_cookie(cookie.to_string()) {
@@ -119,10 +129,12 @@ async fn qrcode_pull(client: &Client, qrcode_key: &str) -> Result<bool, reqwest:
 fn save_cookie(cookie: String) -> Result<bool> {
     let parts: Vec<&str> = cookie.split('?').collect();
     let params: Vec<&str> = parts[1].split('&').collect();
-    let mut map: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    let mut map: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
     for param in params.iter() {
         let kv: Vec<&str> = param.split('=').collect();
-        map.insert(kv[0], kv[1]);
+        let key = kv[0];
+        let value = encode(kv[1]).into_owned().to_string(); // url编码
+        map.insert(key, value);
     }
     let mut file = std::fs::File::create("cookie.txt")?;
     let serialized_map = serde_json::to_string(&map)?;
