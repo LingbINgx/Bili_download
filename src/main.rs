@@ -29,7 +29,14 @@ async fn init() {
 #[tokio::main]
 async fn main() {
     init().await;
-    down::download_bangumi("1183104", "").await.unwrap();
+
+    let mut url = String::new();
+    println!("Please input the url of the video you want to download:");
+    io::stdin()
+        .read_line(&mut url)
+        .expect("Failed to read line");
+
+    down::down_main(&url).await;
 
     // 阻止终端自动关闭
     println!("\nPress Enter to exit...");

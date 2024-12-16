@@ -1,20 +1,43 @@
 use anyhow::{Ok, Result};
-use hex::decode;
-use rand::seq::index;
-use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{Client, Response};
-use serde::{Deserialize, Serialize};
+use reqwest::header::HeaderMap;
+use reqwest::Client;
 use serde_json::{self, Value};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 use tokio::process::Command;
-//use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tokio::join;
 
-use crate::refresh_cookie::{create_headers, read_cookie, Cookies};
+use crate::refresh_cookie::{create_headers, read_cookie};
+
+pub async fn down_main(url: &str) {
+    let (ep_id, season_id) = get_epid_season(url);
+    download_bangumi(&ep_id, &season_id).await.unwrap();
+}
+
+fn get_epid_season(url: &str) -> (String, String) {
+    let mut ep_id = "";
+    let mut season_id = "";
+    let url = url;
+    let parts: Vec<&str> = url.split("?").collect();
+    let path_parts: Vec<&str> = parts[0].split("/").collect();
+    let id = path_parts[path_parts.len() - 1];
+    if id.contains("ep") {
+        ep_id = id;
+        ep_id = ep_id.trim_start_matches("ep");
+    } else if id.contains("ss") {
+        season_id = id;
+        season_id = season_id.trim_start_matches("ss");
+    }
+    (ep_id.to_string(), season_id.to_string())
+}
+
+#[test]
+fn test_down_main() {
+    let (x,y) =get_epid_season("https://www.bilibili.com/bangumi/play/ep249944?spm_id_from=333.1387.0.0&from_spmid=666.25.episode.0");
+    println!("{:?}", x);
+    println!("{:?}", y);
+}
 
 async fn get_playurl(client: &Client, ep_id: &str, cid: &str, headers: HeaderMap) -> Result<Value> {
     let url = "https://api.bilibili.com/pgc/player/web/playurl";
@@ -101,24 +124,33 @@ async fn get_file(
     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
 
-    let video = client
-        .get(url_video)
-        .headers(headers.clone())
-        .send()
-        .await?;
-    let audio = client
-        .get(url_audio)
-        .headers(headers.clone())
-        .send()
-        .await?;
+    if Path::new(&format!("{}.mp4", bangumi_name)).exists() {
+        println!("{} already exists", bangumi_name);
+        return Ok(bangumi_name);
+    } else {
+        println!("Downloading {}", bangumi_name);
+        let video = client
+            .get(url_video)
+            .headers(headers.clone())
+            .send()
+            .await?;
+        let audio = client
+            .get(url_audio)
+            .headers(headers.clone())
+            .send()
+            .await?;
 
-    let mut file_video = File::create(format!("{}_video.mp4", bangumi_name)).unwrap();
-    let mut file_audio = File::create(format!("{}_audio.mp3", bangumi_name)).unwrap();
-    let video_bytes = video.bytes().await?;
-    file_video.write_all(&video_bytes)?;
+        let mut file_video = File::create(format!("{}_video.mp4", bangumi_name)).unwrap();
+        let mut file_audio = File::create(format!("{}_audio.mp3", bangumi_name)).unwrap();
+        let video_bytes = video.bytes().await?;
+        file_video.write_all(&video_bytes)?;
 
-    let audio_bytes = audio.bytes().await?;
-    file_audio.write_all(&audio_bytes)?;
+        let audio_bytes = audio.bytes().await?;
+        file_audio.write_all(&audio_bytes)?;
+
+        concat_video_audio(bangumi_name.to_string()).await;
+        println!("concat completed {}", bangumi_name);
+    }
     Ok(bangumi_name)
 }
 
@@ -128,6 +160,9 @@ async fn concat_video_audio(name: String) {
     let name_audio = format!("{}_audio.mp3", name);
     let handle = tokio::spawn(async move {
         let name_mp4 = name_mp4;
+        if Path::new(&name_mp4).exists() {
+            return;
+        }
         let status = Command::new("ffmpeg")
             .args(&[
                 "-i",
@@ -136,8 +171,8 @@ async fn concat_video_audio(name: String) {
                 name_audio.as_str(),
                 "-c:v",
                 "copy",
-                "-c:v",
-                "h264_nvenc",
+                // "-c:v",
+                // "h264_nvenc",
                 "-threads",
                 "8",
                 "-c:a",
@@ -156,12 +191,7 @@ async fn concat_video_audio(name: String) {
             eprintln!("Fail!");
         }
     });
-
-    // 等待任务完成
-    match handle.await {
-        _ => println!("complete"),
-        Err(e) => eprintln!("ERROR: {:?}", e),
-    }
+    handle.await.unwrap();
 }
 
 async fn get_bangumi_name(
@@ -194,17 +224,12 @@ async fn get_bangumi_name(
 
 fn get_bangumi_name_from_json(json: Value, ep_id: &str) -> String {
     let ep_id = ep_id.parse::<i64>().unwrap();
-    let ep_id_index: usize = {
-        let mut index: usize = 0;
-        for i in 0..json["result"]["episodes"].as_array().unwrap().len() {
-            let ep_id_str = json["result"]["episodes"][i]["ep_id"].as_i64().unwrap_or(0);
-            if ep_id_str == ep_id {
-                index = i;
-                break;
-            }
-        }
-        index
-    };
+    let ep_id_index: usize = json["result"]["episodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|episode| episode["ep_id"].as_i64().unwrap_or(0) == ep_id)
+        .unwrap_or(0);
     let bangumi_name = json["result"]["episodes"][ep_id_index]["share_copy"]
         .as_str()
         .unwrap();
@@ -223,12 +248,12 @@ async fn test_get_playurl() {
     download_bangumi("249943", "").await.unwrap();
 }
 
-pub async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
+async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let path = Path::new("cookie.txt");
     let cookie = read_cookie(&path);
     let headers = create_headers(&cookie);
-    let name_response = get_bangumi_name(&client, &ep_id, season_id, headers.clone()).await?;
+    let name_response = get_bangumi_name(&client, &ep_id, &season_id, headers.clone()).await?;
     if season_id != "" {
         for i in 0..name_response["result"]["episodes"]
             .as_array()
@@ -251,57 +276,7 @@ pub async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
         }
     } else {
         let url_response = get_playurl(&client, &ep_id, "", headers.clone()).await?;
-        let name = get_file(url_response, name_response, ep_id, &client, headers).await?;
-        concat_video_audio(name).await;
+        get_file(url_response, name_response, ep_id, &client, headers).await?;
     }
     Ok(())
-}
-
-use ffmpeg_next::{codec, format, media, util};
-
-async fn concat_video_audio_test() {
-    fn main() -> Result<(), Box<dyn std::error::Error>> {
-        // 初始化 FFmpeg
-        ffmpeg_next::init().unwrap();
-
-        // 输入字节流（模拟 H.264 数据流）
-        let input_bytes: Vec<u8> = vec![/* 字节流数据 */];
-        let mut input_cursor = std::io::Cursor::new(input_bytes);
-
-        // 输出文件
-        let output_path = "output.mp4";
-
-        // 打开输入流
-        let mut input_format_context = format::input::from_seekable(&mut input_cursor)?;
-
-        // 创建输出上下文
-        let mut output_format_context = format::output(&output_path)?;
-
-        // 复制输入流到输出流
-        for stream in input_format_context.streams() {
-            if let media::Type::Video = stream.codec().medium() {
-                let mut output_stream =
-                    output_format_context.add_stream(codec::encoder::find(stream.codec().id())?)?;
-                output_stream.set_parameters(stream.parameters())?;
-            }
-        }
-
-        // 写入文件头
-        output_format_context.write_header()?;
-
-        // 解码并写入每帧数据
-        for (stream, mut packet) in input_format_context.packets() {
-            if let media::Type::Video = input_format_context.stream(stream).codec().medium() {
-                packet.rescale_ts(
-                    input_format_context.stream(stream).time_base(),
-                    output_format_context.stream(stream).time_base(),
-                );
-                packet.write_interleaved(&mut output_format_context)?;
-            }
-        }
-
-        // 写入文件尾
-        output_format_context.write_trailer()?;
-        Ok(())
-    }
 }
