@@ -1,4 +1,4 @@
-use anyhow::{Ok, Result};
+use anyhow::{Context, Result};
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serde_json::{self, Value};
@@ -10,107 +10,103 @@ use tokio::process::Command;
 
 use crate::refresh_cookie::{create_headers, read_cookie};
 
-pub async fn down_main(url: &str) {
-    let (ep_id, season_id) = get_epid_season(url);
-    download_bangumi(&ep_id, &season_id).await.unwrap();
+pub async fn down_main(url: &str) -> Result<()> {
+    let (ep_id, season_id) =
+        get_epid_season(url).context("Failed to parse episode ID and season ID from the URL")?;
+    download_bangumi(&ep_id, &season_id).await?;
+    Ok(())
 }
 
-fn get_epid_season(url: &str) -> (String, String) {
-    let mut ep_id = "";
-    let mut season_id = "";
-    let url = url;
-    let parts: Vec<&str> = url.split("?").collect();
-    let path_parts: Vec<&str> = parts[0].split("/").collect();
-    let id = path_parts[path_parts.len() - 1];
+fn get_epid_season(url: &str) -> Result<(String, String)> {
+    let parts: Vec<&str> = url.split('?').collect();
+    let path_parts: Vec<&str> = parts
+        .get(0)
+        .context("URL does not contain a valid path")?
+        .split('/')
+        .collect();
+
+    let id = path_parts
+        .last()
+        .context("Failed to extract the last part of the URL path")?;
     if id.contains("ep") {
-        ep_id = id;
-        ep_id = ep_id.trim_start_matches("ep");
+        let ep_id = id.trim_start_matches("ep").to_string();
+        Ok((ep_id, String::new()))
     } else if id.contains("ss") {
-        season_id = id;
-        season_id = season_id.trim_start_matches("ss");
+        let season_id = id.trim_start_matches("ss").to_string();
+        Ok((String::new(), season_id))
+    } else {
+        Err(anyhow::anyhow!(
+            "URL does not contain valid episode or season ID"
+        ))
     }
-    (ep_id.to_string(), season_id.to_string())
-}
-
-#[test]
-fn test_down_main() {
-    let (x,y) =get_epid_season("https://www.bilibili.com/bangumi/play/ep249944?spm_id_from=333.1387.0.0&from_spmid=666.25.episode.0");
-    println!("{:?}", x);
-    println!("{:?}", y);
 }
 
 async fn get_playurl(client: &Client, ep_id: &str, cid: &str, headers: HeaderMap) -> Result<Value> {
     let url = "https://api.bilibili.com/pgc/player/web/playurl";
-    let mut params: HashMap<&str, &str> = HashMap::new();
-    params.insert("avid", "");
-    params.insert("bvid", "");
-    params.insert("ep_id", ep_id);
-    params.insert("cid", cid);
-    params.insert("qn", "112");
-    params.insert("fnval", "16");
-    params.insert("fnver", "0");
-    params.insert("fourk", "1");
-    params.insert("session", "");
-    params.insert("from_client", "BROWSER");
-    params.insert("drm_tech_type", "2");
+    let params: HashMap<&str, &str> = [
+        ("avid", ""),
+        ("bvid", ""),
+        ("ep_id", ep_id),
+        ("cid", cid),
+        ("qn", "112"),
+        ("fnval", "16"),
+        ("fnver", "0"),
+        ("fourk", "1"),
+        ("session", ""),
+        ("from_client", "BROWSER"),
+        ("drm_tech_type", "2"),
+    ]
+    .iter()
+    .cloned()
+    .collect();
 
     let response = client
         .get(url)
         .headers(headers)
         .query(&params)
         .send()
-        .await?;
-    let resp_text = response.text().await?;
-    let resp_json: Value = serde_json::from_str(&resp_text)?;
-    //println!("{:?}", resp_json);
+        .await
+        .context("Failed to send request to Bilibili play URL API")?;
+
+    let resp_text = response
+        .text()
+        .await
+        .context("Failed to read response text from play URL API")?;
+    let resp_json: Value = serde_json::from_str(&resp_text)
+        .context("Failed to parse JSON response from play URL API")?;
 
     Ok(resp_json)
 }
 
-fn get_file_url(response: Value) -> (String, String) {
-    let video_index = {
-        let mut max_size_video: i64 = 0;
-        let mut index: usize = 0;
-        for i in 0..response["result"]["dash"]["video"]
-            .as_array()
-            .unwrap()
-            .len()
-        {
-            let size = response["result"]["dash"]["video"][i]["size"]
-                .as_i64()
-                .unwrap_or(0);
-            if size > max_size_video {
-                max_size_video = size;
-                index = i;
-            }
-        }
-        index
-    };
-    let audio_index = {
-        let mut max_size_audio: i64 = 0;
-        let mut index: usize = 0;
-        for i in 0..response["result"]["dash"]["audio"]
-            .as_array()
-            .unwrap()
-            .len()
-        {
-            let size = response["result"]["dash"]["audio"][i]["size"]
-                .as_i64()
-                .unwrap_or(0);
-            if size > max_size_audio {
-                max_size_audio = size;
-                index = i;
-            }
-        }
-        index
-    };
-    let url_video = response["result"]["dash"]["video"][video_index]["backupUrl"][0]
-        .as_str()
-        .unwrap_or("");
-    let url_audio = response["result"]["dash"]["audio"][audio_index]["backupUrl"][0]
-        .as_str()
-        .unwrap_or("");
-    (url_video.to_string(), url_audio.to_string())
+fn get_file_url(response: &Value) -> Result<(String, String)> {
+    let video_index = response["result"]["dash"]["video"]
+        .as_array()
+        .context("Missing or invalid video array in response JSON")?
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, v)| v["size"].as_i64().unwrap_or(0))
+        .map(|(i, _)| i)
+        .context("No valid video streams found")?;
+
+    let audio_index = response["result"]["dash"]["audio"]
+        .as_array()
+        .context("Missing or invalid audio array in response JSON")?
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, a)| a["size"].as_i64().unwrap_or(0))
+        .map(|(i, _)| i)
+        .context("No valid audio streams found")?;
+
+    let url_video = response["result"]["dash"]["video"][video_index]["backupUrl"]
+        .get(0)
+        .and_then(|u| u.as_str())
+        .context("No backup URL found for video stream")?;
+    let url_audio = response["result"]["dash"]["audio"][audio_index]["backupUrl"]
+        .get(0)
+        .and_then(|u| u.as_str())
+        .context("No backup URL found for audio stream")?;
+
+    Ok((url_video.to_string(), url_audio.to_string()))
 }
 
 async fn get_file(
@@ -120,41 +116,55 @@ async fn get_file(
     client: &Client,
     headers: HeaderMap,
 ) -> Result<String> {
-    let (url_video, url_audio) = get_file_url(url_response);
+    let (url_video, url_audio) = get_file_url(&url_response)?;
     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
 
-    if Path::new(&format!("{}.mp4", bangumi_name)).exists() {
+    let video_path = format!("{}_video.mp4", bangumi_name);
+    let audio_path = format!("{}_audio.mp3", bangumi_name);
+    let output_path = format!("{}.mp4", bangumi_name);
+
+    if Path::new(&output_path).exists() {
         println!("{} already exists", bangumi_name);
         return Ok(bangumi_name);
-    } else {
-        println!("Downloading {}", bangumi_name);
-        let video = client
-            .get(url_video)
-            .headers(headers.clone())
-            .send()
-            .await?;
-        let audio = client
-            .get(url_audio)
-            .headers(headers.clone())
-            .send()
-            .await?;
-
-        let mut file_video = File::create(format!("{}_video.mp4", bangumi_name)).unwrap();
-        let mut file_audio = File::create(format!("{}_audio.mp3", bangumi_name)).unwrap();
-        let video_bytes = video.bytes().await?;
-        file_video.write_all(&video_bytes)?;
-
-        let audio_bytes = audio.bytes().await?;
-        file_audio.write_all(&audio_bytes)?;
-
-        concat_video_audio(bangumi_name.to_string()).await;
-        println!("concat completed {}", bangumi_name);
     }
+
+    println!("Downloading {}", bangumi_name);
+    let video_bytes = client
+        .get(&url_video)
+        .headers(headers.clone())
+        .send()
+        .await
+        .context("Failed to download video stream")?
+        .bytes()
+        .await
+        .context("Failed to read video stream data")?;
+
+    let audio_bytes = client
+        .get(&url_audio)
+        .headers(headers.clone())
+        .send()
+        .await
+        .context("Failed to download audio stream")?
+        .bytes()
+        .await
+        .context("Failed to read audio stream data")?;
+
+    File::create(&video_path)
+        .and_then(|mut f| f.write_all(&video_bytes))
+        .context("Failed to save video file")?;
+
+    File::create(&audio_path)
+        .and_then(|mut f| f.write_all(&audio_bytes))
+        .context("Failed to save audio file")?;
+
+    concat_video_audio(bangumi_name.clone()).await?;
+    println!("Concat completed for {}", bangumi_name);
+
     Ok(bangumi_name)
 }
 
-async fn concat_video_audio(name: String) {
+async fn concat_video_audio(name: String) -> Result<()> {
     let name_mp4 = format!("{}.mp4", name);
     let name_video = format!("{}_video.mp4", name);
     let name_audio = format!("{}_audio.mp3", name);
@@ -191,7 +201,8 @@ async fn concat_video_audio(name: String) {
             eprintln!("Fail!");
         }
     });
-    handle.await.unwrap();
+    handle.await?;
+    Ok(())
 }
 
 async fn get_bangumi_name(
@@ -213,11 +224,6 @@ async fn get_bangumi_name(
     let resp_text = response.text().await?;
     let resp_text_str = std::str::from_utf8(resp_text.as_bytes()).unwrap();
     let resp_json: Value = serde_json::from_str(resp_text_str)?;
-
-    // let path = Path::new("bangumi_name.json");
-    // let mut file = File::create(path).unwrap();
-    // file.write_all(serde_json::to_string_pretty(&resp_json).unwrap().as_bytes())
-    //     .unwrap();
 
     Ok(resp_json)
 }
@@ -241,11 +247,6 @@ fn remove_punctuation(input: &str) -> String {
         .chars()
         .filter(|c| !c.is_ascii_punctuation())
         .collect()
-}
-
-#[tokio::test]
-async fn test_get_playurl() {
-    download_bangumi("249943", "").await.unwrap();
 }
 
 async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {

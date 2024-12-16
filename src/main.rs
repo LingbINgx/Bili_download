@@ -36,7 +36,9 @@ async fn main() {
         .read_line(&mut url)
         .expect("Failed to read line");
 
-    down::down_main(&url).await;
+    if let Err(e) = down::down_main(&url).await {
+        eprintln!("Download failed: {}", e);
+    }
 
     // 阻止终端自动关闭
     println!("\nPress Enter to exit...");
