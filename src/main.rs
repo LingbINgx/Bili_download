@@ -5,14 +5,14 @@ use std::io;
 mod down;
 mod refresh_cookie;
 
+/// 调用二维码登录函数
 async fn init() {
-    // 调用二维码登录函数
+    println!("waiting for login...");
     let client: Client = reqwest::Client::new();
-
     match refresh_cookie::refresh_cookie(&client).await {
         Ok(flag) => {
             if flag {
-                println!("dont need to refresh cookie");
+                println!("dont need to refresh cookie\nLogin successful");
             } else {
                 println!("cookie is out of date or havent logined, please login again");
                 if login_qrcode(&client).await {

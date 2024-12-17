@@ -126,8 +126,8 @@ async fn get_file(
     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
 
-    let video_path = format!("{}_video.mp4", bangumi_name);
-    let audio_path = format!("{}_audio.mp3", bangumi_name);
+    let video_path = format!("{}_video.m4s", bangumi_name);
+    let audio_path = format!("{}_audio.m4s", bangumi_name);
     let output_path = format!("{}.mp4", bangumi_name);
 
     if Path::new(&output_path).exists() {
@@ -173,8 +173,8 @@ async fn get_file(
 /// 合并视频和音频文件
 async fn concat_video_audio(name: String) -> Result<()> {
     let name_mp4 = format!("{}.mp4", name);
-    let name_video = format!("{}_video.mp4", name);
-    let name_audio = format!("{}_audio.mp3", name);
+    let name_video = format!("{}_video.m4s", name);
+    let name_audio = format!("{}_audio.m4s", name);
     let handle = tokio::spawn(async move {
         let name_mp4 = name_mp4;
         if Path::new(&name_mp4).exists() {
@@ -190,8 +190,8 @@ async fn concat_video_audio(name: String) -> Result<()> {
                 "copy",
                 // "-c:v",
                 // "h264_nvenc",
-                "-threads",
-                "8",
+                // "-threads",
+                // "8",
                 "-c:a",
                 "aac",
                 name_mp4.as_str(),

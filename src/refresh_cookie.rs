@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 //use std::process::Command;
+use chrono::{DateTime, TimeZone, Utc};
 
 #[derive(Serialize, Deserialize)]
 #[allow(non_snake_case)]
@@ -33,9 +34,10 @@ pub async fn refresh_cookie(client: &Client) -> Result<bool> {
         is_need_refresh(client, &cookie)
             .await
             .unwrap_or((-1, true, String::new()));
+    let date_time = convert_timestamp_to_date(timestamp.parse::<i64>().unwrap_or(0));
     println!(
         "code: {}, refresh: {}, timestamp: {}",
-        code, refresh, timestamp
+        code, refresh, date_time
     );
     if code != 0 {
         return Ok(false);
@@ -54,6 +56,14 @@ pub async fn refresh_cookie(client: &Client) -> Result<bool> {
     // }
 
     Ok(!refresh)
+}
+
+/// 将时间戳转换为日期时间 +8
+fn convert_timestamp_to_date(timestamp: i64) -> DateTime<Utc> {
+    let timestamp_in_seconds = timestamp / 1000 + 8 * 3600;
+    Utc.timestamp_opt(timestamp_in_seconds, (timestamp % 1000) as u32 * 1_000_000)
+        .single()
+        .expect("Invalid timestamp")
 }
 
 /// 读取cookie文件
