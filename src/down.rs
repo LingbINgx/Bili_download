@@ -4,20 +4,23 @@ use reqwest::Client;
 use serde_json::{self, Value};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use tokio::process::Command;
 
-use crate::refresh_cookie::{create_headers, read_cookie};
+use crate::refresh_cookie::{create_headers, Cookies};
 
 pub async fn down_main(url: &str) -> Result<()> {
     let (ep_id, season_id) =
         get_epid_season(url).context("Failed to parse episode ID and season ID from the URL")?;
+    println!("ep_id: {}, season_id: {}", ep_id, season_id);
     download_bangumi(&ep_id, &season_id).await?;
     Ok(())
 }
 
+/// 获取网址中的epid和seasonid
 fn get_epid_season(url: &str) -> Result<(String, String)> {
+    let url = url.trim();
     let parts: Vec<&str> = url.split('?').collect();
     let path_parts: Vec<&str> = parts
         .get(0)
@@ -41,6 +44,7 @@ fn get_epid_season(url: &str) -> Result<(String, String)> {
     }
 }
 
+/// 获取视频播放地址
 async fn get_playurl(client: &Client, ep_id: &str, cid: &str, headers: HeaderMap) -> Result<Value> {
     let url = "https://api.bilibili.com/pgc/player/web/playurl";
     let params: HashMap<&str, &str> = [
@@ -78,13 +82,14 @@ async fn get_playurl(client: &Client, ep_id: &str, cid: &str, headers: HeaderMap
     Ok(resp_json)
 }
 
+/// 获取json文件中的视频文件地址
 fn get_file_url(response: &Value) -> Result<(String, String)> {
     let video_index = response["result"]["dash"]["video"]
         .as_array()
         .context("Missing or invalid video array in response JSON")?
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, v)| v["size"].as_i64().unwrap_or(0))
+        .iter() //迭代器
+        .enumerate() //枚举
+        .max_by_key(|(_, v)| v["size"].as_i64().unwrap_or(0)) // 索引 键值，根据size排序
         .map(|(i, _)| i)
         .context("No valid video streams found")?;
 
@@ -109,6 +114,7 @@ fn get_file_url(response: &Value) -> Result<(String, String)> {
     Ok((url_video.to_string(), url_audio.to_string()))
 }
 
+/// 下载视频文件
 async fn get_file(
     url_response: Value,
     name_response: Value,
@@ -164,6 +170,7 @@ async fn get_file(
     Ok(bangumi_name)
 }
 
+/// 合并视频和音频文件
 async fn concat_video_audio(name: String) -> Result<()> {
     let name_mp4 = format!("{}.mp4", name);
     let name_video = format!("{}_video.mp4", name);
@@ -205,6 +212,7 @@ async fn concat_video_audio(name: String) -> Result<()> {
     Ok(())
 }
 
+/// 获取番剧名称
 async fn get_bangumi_name(
     client: &Client,
     ep_id: &str,
@@ -228,6 +236,7 @@ async fn get_bangumi_name(
     Ok(resp_json)
 }
 
+/// 从json文件中获取该ep_id对应的番剧名称
 fn get_bangumi_name_from_json(json: Value, ep_id: &str) -> String {
     let ep_id = ep_id.parse::<i64>().unwrap();
     let ep_id_index: usize = json["result"]["episodes"]
@@ -242,17 +251,38 @@ fn get_bangumi_name_from_json(json: Value, ep_id: &str) -> String {
     bangumi_name.to_string()
 }
 
+/// 去除文件名字符串中的windows不允许的标点符号
 fn remove_punctuation(input: &str) -> String {
+    let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     input
         .chars()
-        .filter(|c| !c.is_ascii_punctuation())
+        .filter(|c| !invalid_chars.contains(c))
         .collect()
 }
 
+fn read_cookie_or_not(path: &Path) -> Result<Cookies> {
+    if path.exists() {
+        //println!("{:?} exists", path);
+        let mut file = File::open(path)?;
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        let cookie: Cookies = serde_json::from_str(&content)?;
+        return Ok(cookie);
+    } else {
+        println!("{:?} does not exist", path);
+    }
+    return Ok(Cookies {
+        SESSDATA: String::new(),
+        bili_jct: String::new(),
+        refresh_token: String::new(),
+    });
+}
+
+/// 下载番剧总函数
 async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
     let client = reqwest::Client::new();
-    let path = Path::new("cookie.txt");
-    let cookie = read_cookie(&path);
+    let path = Path::new("./cookie.txt");
+    let cookie = read_cookie_or_not(&path)?;
     let headers = create_headers(&cookie);
     let name_response = get_bangumi_name(&client, &ep_id, &season_id, headers.clone()).await?;
     if season_id != "" {

@@ -20,9 +20,9 @@ use std::path::Path;
 #[allow(non_snake_case)]
 #[derive(Debug)]
 pub struct Cookies {
-    SESSDATA: String,
-    bili_jct: String,
-    refresh_token: String,
+    pub SESSDATA: String,
+    pub bili_jct: String,
+    pub refresh_token: String,
 }
 
 /// 刷新cookie接口逻辑

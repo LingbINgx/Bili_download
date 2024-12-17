@@ -29,21 +29,34 @@ async fn init() {
 #[tokio::main]
 async fn main() {
     init().await;
+    loop {
+        let mut url = String::new();
+        println!(
+            "Please input the url of the bangumi you want to download, or input 'exit' to exit:"
+        );
+        loop {
+            url.clear();
+            io::stdin()
+                .read_line(&mut url)
+                .expect("Failed to read line");
+            if url != "\r\n" {
+                break;
+            }
+        }
 
-    let mut url = String::new();
-    println!("Please input the url of the video you want to download:");
-    io::stdin()
-        .read_line(&mut url)
-        .expect("Failed to read line");
+        if url.trim() == "exit" {
+            break;
+        }
 
-    if let Err(e) = down::down_main(&url).await {
-        eprintln!("Download failed: {}", e);
+        if let Err(e) = down::down_main(&url).await {
+            eprintln!("Download failed: {}", e);
+        }
+
+        // 阻止终端自动关闭
+        // println!("\nPress Enter to exit...");
+        // let mut input = String::new();
+        // io::stdin()
+        //     .read_line(&mut input)
+        //     .expect("Failed to read line");
     }
-
-    // 阻止终端自动关闭
-    println!("\nPress Enter to exit...");
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .expect("Failed to read line");
 }
