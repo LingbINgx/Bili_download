@@ -10,38 +10,17 @@ use tokio::process::Command;
 
 use crate::refresh_cookie::{create_headers, Cookies};
 
-pub async fn down_main(url: &str) -> Result<()> {
-    let (ep_id, season_id) =
-        get_epid_season(url).context("Failed to parse episode ID and season ID from the URL")?;
-    println!("ep_id: {}, season_id: {}", ep_id, season_id);
-    download_bangumi(&ep_id, &season_id).await?;
+// pub async fn _down_main(url: &str) -> Result<()> {
+//     let (ep_id, season_id) =
+//         get_epid_season(url).context("Failed to parse episode ID and season ID from the URL")?;
+//     println!("ep_id: {}, season_id: {}", ep_id, season_id);
+//     download_bangumi(&ep_id, &season_id).await?;
+//     Ok(())
+// }
+
+pub async fn down_main((ep_id, season_id): (&str, &str)) -> Result<()> {
+    download_bangumi(ep_id, season_id).await?;
     Ok(())
-}
-
-/// 获取网址中的epid和seasonid
-fn get_epid_season(url: &str) -> Result<(String, String)> {
-    let url = url.trim();
-    let parts: Vec<&str> = url.split('?').collect();
-    let path_parts: Vec<&str> = parts
-        .get(0)
-        .context("URL does not contain a valid path")?
-        .split('/')
-        .collect();
-
-    let id = path_parts
-        .last()
-        .context("Failed to extract the last part of the URL path")?;
-    if id.contains("ep") {
-        let ep_id = id.trim_start_matches("ep").to_string();
-        Ok((ep_id, String::new()))
-    } else if id.contains("ss") {
-        let season_id = id.trim_start_matches("ss").to_string();
-        Ok((String::new(), season_id))
-    } else {
-        Err(anyhow::anyhow!(
-            "URL does not contain valid episode or season ID"
-        ))
-    }
 }
 
 /// 获取视频播放地址
@@ -121,21 +100,23 @@ async fn get_file(
     ep_id: &str,
     client: &Client,
     headers: HeaderMap,
-) -> Result<String> {
+) -> Result<()> {
     let (url_video, url_audio) = get_file_url(&url_response)?;
     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
-
-    let video_path = format!("{}_video.m4s", bangumi_name);
-    let audio_path = format!("{}_audio.m4s", bangumi_name);
-    let output_path = format!("{}.mp4", bangumi_name);
+    if !Path::new("./download").exists() {
+        std::fs::create_dir_all("./download")?;
+    }
+    let video_path = format!("./download/{}_video.m4s", bangumi_name);
+    let audio_path = format!("./download/{}_audio.m4s", bangumi_name);
+    let output_path = format!("./download/{}.mp4", bangumi_name);
 
     if Path::new(&output_path).exists() {
         println!("{} already exists", bangumi_name);
-        return Ok(bangumi_name);
+        return Ok(());
     }
 
-    println!("Downloading {}", bangumi_name);
+    println!("is downloading {}", bangumi_name);
     let video_bytes = client
         .get(&url_video)
         .headers(headers.clone())
@@ -167,14 +148,17 @@ async fn get_file(
     concat_video_audio(bangumi_name.clone()).await?;
     println!("Concat completed for {}", bangumi_name);
 
-    Ok(bangumi_name)
+    Ok(())
 }
 
 /// 合并视频和音频文件
-async fn concat_video_audio(name: String) -> Result<()> {
-    let name_mp4 = format!("{}.mp4", name);
-    let name_video = format!("{}_video.m4s", name);
-    let name_audio = format!("{}_audio.m4s", name);
+pub async fn concat_video_audio(name: String) -> Result<()> {
+    if !Path::new("./download").exists() {
+        std::fs::create_dir_all("./download")?;
+    }
+    let name_mp4 = format!("./download/{}.mp4", name);
+    let name_video = format!("./download/{}_video.m4s", name);
+    let name_audio = format!("./download/{}_audio.m4s", name);
     let handle = tokio::spawn(async move {
         let name_mp4 = name_mp4;
         if Path::new(&name_mp4).exists() {
@@ -252,7 +236,7 @@ fn get_bangumi_name_from_json(json: Value, ep_id: &str) -> String {
 }
 
 /// 去除文件名字符串中的windows不允许的标点符号
-fn remove_punctuation(input: &str) -> String {
+pub fn remove_punctuation(input: &str) -> String {
     let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     input
         .chars()
@@ -260,7 +244,7 @@ fn remove_punctuation(input: &str) -> String {
         .collect()
 }
 
-fn read_cookie_or_not(path: &Path) -> Result<Cookies> {
+pub fn read_cookie_or_not(path: &Path) -> Result<Cookies> {
     if path.exists() {
         //println!("{:?} exists", path);
         let mut file = File::open(path)?;
@@ -276,6 +260,24 @@ fn read_cookie_or_not(path: &Path) -> Result<Cookies> {
         bili_jct: String::new(),
         refresh_token: String::new(),
     });
+}
+
+async fn down_season(
+    ep_id_cp: String,
+    client: &Client,
+    headers: HeaderMap,
+    name_response: Value,
+) -> Result<()> {
+    let url_response = get_playurl(&client, &ep_id_cp, "", headers.clone()).await?;
+    get_file(
+        url_response,
+        name_response.clone(),
+        &ep_id_cp,
+        &client,
+        headers.clone(),
+    )
+    .await?;
+    Ok(())
 }
 
 /// 下载番剧总函数
@@ -295,15 +297,7 @@ async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
                 .as_i64()
                 .unwrap_or(0)
                 .to_string();
-            let url_response = get_playurl(&client, &ep_id_cp, "", headers.clone()).await?;
-            get_file(
-                url_response,
-                name_response.clone(),
-                &ep_id_cp,
-                &client,
-                headers.clone(),
-            )
-            .await?;
+            down_season(ep_id_cp, &client, headers.clone(), name_response.clone()).await?;
         }
     } else {
         let url_response = get_playurl(&client, &ep_id, "", headers.clone()).await?;
