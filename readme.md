@@ -12,7 +12,7 @@ Bili_download是一个轻量级的程序，旨在帮助用户快速下载B站的
 
 1. 克隆该项目到本地：
    ```bash
-   git clone https://github.com/your-username/downloader-mini-program.git
+   git clone https://github.com/LingbINgx/Bili_download.git
    ```
 
 2. 安装FFmpeg
