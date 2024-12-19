@@ -20,9 +20,7 @@ async fn main() {
     init().await;
     loop {
         let mut url = String::new();
-        println!(
-            "Please input the url of the bangumi you want to download, or input 'exit' to exit:"
-        );
+        println!("Please input the url of the bilibili to download, or 'exit' to exit:");
         loop {
             url.clear();
             io::stdin()
@@ -109,7 +107,7 @@ fn get_epid_season(url: &str) -> Result<Video> {
         })
     } else {
         Err(anyhow::anyhow!(
-            "URL does not contain valid episode ,season ID or BV ID"
+            "URL does not contain valid episode, season ID or BV ID"
         ))
     }
 }
