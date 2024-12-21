@@ -168,21 +168,27 @@ pub async fn concat_video_audio(name: String) -> Result<()> {
         }
         let status = Command::new("ffmpeg")
             .args(&[
-                "-loglevel",
-                "error",
                 "-i",
                 name_video.as_str(),
                 "-i",
                 name_audio.as_str(),
                 "-c:v",
                 "copy",
-                // "-c:v",
-                // "h264_nvenc",
-                // "-threads",
-                // "8",
                 "-c:a",
-                "aac",
+                "copy",
+                "-shortest",
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-y",
+                "-movflags",
+                "+faststart",
                 name_mp4.as_str(),
+                "-hide_banner",
+                "-stats",
+                "-loglevel",
+                "error",
             ])
             .status()
             .await
