@@ -20,7 +20,7 @@ async fn main() {
     init().await;
     loop {
         let mut url = String::new();
-        println!("Please input the url of the bilibili to download, or 'exit' to exit:");
+        println!("\nPlease input the url of the bilibili to download, or 'exit' to exit:");
         loop {
             url.clear();
             io::stdin()

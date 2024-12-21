@@ -5,20 +5,12 @@ use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serde_json::{self, Value};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Write};
-use std::path::{self, Path};
+use std::path::Path;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 use crate::refresh_cookie::{create_headers, Cookies};
-
-// pub async fn _down_main(url: &str) -> Result<()> {
-//     let (ep_id, season_id) =
-//         get_epid_season(url).context("Failed to parse episode ID and season ID from the URL")?;
-//     println!("ep_id: {}, season_id: {}", ep_id, season_id);
-//     download_bangumi(&ep_id, &season_id).await?;
-//     Ok(())
-// }
 
 pub async fn down_main((ep_id, season_id): (&str, &str)) -> Result<()> {
     download_bangumi(ep_id, season_id).await?;
@@ -95,92 +87,37 @@ fn get_file_url(response: &Value) -> Result<(String, String)> {
     Ok((url_video.to_string(), url_audio.to_string()))
 }
 
-/// 下载视频文件
-// async fn get_file(
-//     url_response: Value,
-//     name_response: Value,
-//     ep_id: &str,
-//     client: &Client,
-//     headers: HeaderMap,
-// ) -> Result<()> {
-//     let (url_video, url_audio) = get_file_url(&url_response)?;
-//     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
-//     let bangumi_name = remove_punctuation(&bangumi_name_temp);
-//     if !Path::new("./download").exists() {
-//         std::fs::create_dir_all("./download")?;
-//     }
-//     let video_path = format!("./download/{}_video.m4s", bangumi_name);
-//     let audio_path = format!("./download/{}_audio.m4s", bangumi_name);
-//     let output_path = format!("./download/{}.mp4", bangumi_name);
-
-//     if Path::new(&output_path).exists() {
-//         println!("{} already exists", bangumi_name);
-//         return Ok(());
-//     }
-
-//     println!("is downloading {}", bangumi_name);
-//     let video_bytes = client
-//         .get(&url_video)
-//         .headers(headers.clone())
-//         .send()
-//         .await
-//         .context("Failed to download video stream")?
-//         .bytes()
-//         .await
-//         .context("Failed to read video stream data")?;
-
-//     let audio_bytes = client
-//         .get(&url_audio)
-//         .headers(headers.clone())
-//         .send()
-//         .await
-//         .context("Failed to download audio stream")?
-//         .bytes()
-//         .await
-//         .context("Failed to read audio stream data")?;
-
-//     File::create(&video_path)
-//         .and_then(|mut f| f.write_all(&video_bytes))
-//         .context("Failed to save video file")?;
-
-//     File::create(&audio_path)
-//         .and_then(|mut f| f.write_all(&audio_bytes))
-//         .context("Failed to save audio file")?;
-
-//     concat_video_audio(bangumi_name.clone()).await?;
-//     println!("Concat completed for {}", bangumi_name);
-
-//     Ok(())
-// }
-
-async fn down_from_url(url: String, client: &Client, headers: HeaderMap, path: &str) -> Result<()> {
+async fn down_from_url(url: &str, client: Client, headers: HeaderMap, path: &str) -> Result<()> {
     let resp = client
-        .get(&url)
+        .get(url)
         .headers(headers.clone())
         .send()
         .await
         .context("Failed to download video stream")?;
-    let total_size_video = resp.content_length().unwrap_or(0);
-    let pb = ProgressBar::new(total_size_video);
+    let total_size = resp.content_length().unwrap_or(0);
+    let pb = ProgressBar::new(total_size);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")?
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) ")?
             .progress_chars("=> "),
     );
-    let mut file = File::create(&path)?;
-    let mut downloaded: u64 = 0;
+
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    let mut file = File::create(&path).await?;
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.try_next().await? {
         let chunk = chunk;
-        file.write_all(&chunk)?;
+        file.write_all(&chunk).await?;
+
         pb.inc(chunk.len() as u64);
-        downloaded += chunk.len() as u64;
-        pb.set_position(downloaded);
     }
-    pb.finish_with_message("Downloaded video stream");
+    pb.set_position(total_size);
+    pb.finish_with_message("Downloaded stream");
     Ok(())
 }
 
+/// 下载番剧文件
 async fn down_file_bangumi(
     url_response: Value,
     name_response: Value,
@@ -204,8 +141,12 @@ async fn down_file_bangumi(
     }
     println!("downloading {}", bangumi_name);
 
-    down_from_url(url_video, client, headers.clone(), &video_path).await?;
-    down_from_url(url_audio, client, headers.clone(), &audio_path).await?;
+    let urls = vec![(url_video, video_path), (url_audio, audio_path)];
+    for (url, path) in urls {
+        let client = client.clone();
+        let headers = headers.clone();
+        down_from_url(&url, client, headers, &path).await?;
+    }
 
     concat_video_audio(bangumi_name.clone()).await?;
     println!("Concat completed for {}", bangumi_name);
@@ -307,12 +248,12 @@ pub fn remove_punctuation(input: &str) -> String {
         .collect()
 }
 
-pub fn read_cookie_or_not(path: &Path) -> Result<Cookies> {
+pub async fn read_cookie_or_not(path: &Path) -> Result<Cookies> {
     if path.exists() {
         //println!("{:?} exists", path);
-        let mut file = File::open(path)?;
+        let mut file = File::open(path).await?;
         let mut content = String::new();
-        file.read_to_string(&mut content)?;
+        file.read_to_string(&mut content).await?;
         let cookie: Cookies = serde_json::from_str(&content)?;
         return Ok(cookie);
     } else {
@@ -347,7 +288,7 @@ async fn down_season(
 async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let path = Path::new("./cookie.txt");
-    let cookie = read_cookie_or_not(&path)?;
+    let cookie = read_cookie_or_not(&path).await?;
     let headers = create_headers(&cookie);
     let name_response = get_bangumi_name(&client, &ep_id, &season_id, headers.clone()).await?;
     if season_id != "" {
