@@ -2,6 +2,8 @@ use crate::down_bangumi::{concat_video_audio, read_cookie_or_not, remove_punctua
 use crate::refresh_cookie::create_headers;
 use crate::wbi::get_wbi_keys_main;
 use anyhow::{Context, Ok, Result};
+use futures_util::TryStreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serde::Deserialize;
@@ -111,13 +113,67 @@ fn get_bv_url(play_url: &Value) -> Result<(String, String)> {
     Ok((video_url, audio_url))
 }
 
-async fn download_file(
+// async fn download_file(
+//     client: &Client,
+//     url: Value,
+//     name: String,
+//     headers: HeaderMap,
+// ) -> Result<()> {
+//     let (video_url, audio_url) = get_bv_url(&url).unwrap();
+//     if !Path::new("./download").exists() {
+//         std::fs::create_dir_all("./download")?;
+//     }
+//     let video_path = format!("./download/{}_video.m4s", name);
+//     let audio_path = format!("./download/{}_audio.m4s", name);
+//     let output_path = format!("./download/{}.mp4", name);
+
+//     if Path::new(&output_path).exists() {
+//         println!("./download/{} already exists", output_path);
+//         return Ok(());
+//     }
+
+//     println!("is downloading {}", output_path);
+//     let video_bytes = client
+//         .get(&video_url)
+//         .headers(headers.clone())
+//         .send()
+//         .await
+//         .context("Failed to download video stream")?
+//         .bytes()
+//         .await
+//         .context("Failed to read video stream data")?;
+
+//     let audio_bytes = client
+//         .get(&audio_url)
+//         .headers(headers.clone())
+//         .send()
+//         .await
+//         .context("Failed to download audio stream")?
+//         .bytes()
+//         .await
+//         .context("Failed to read audio stream data")?;
+
+//     File::create(&video_path)
+//         .and_then(|mut f| f.write_all(&video_bytes))
+//         .context("Failed to save video file")?;
+
+//     File::create(&audio_path)
+//         .and_then(|mut f| f.write_all(&audio_bytes))
+//         .context("Failed to save audio file")?;
+
+//     concat_video_audio(name.clone()).await?;
+//     println!("Concat completed for {}", name);
+//     Ok(())
+// }
+
+async fn down_file_bv_(
     client: &Client,
     url: Value,
     name: String,
     headers: HeaderMap,
 ) -> Result<()> {
     let (video_url, audio_url) = get_bv_url(&url).unwrap();
+
     if !Path::new("./download").exists() {
         std::fs::create_dir_all("./download")?;
     }
@@ -126,39 +182,64 @@ async fn download_file(
     let output_path = format!("./download/{}.mp4", name);
 
     if Path::new(&output_path).exists() {
-        println!("./download/{} already exists", output_path);
+        println!("{} already exists", output_path);
         return Ok(());
     }
+    println!("downloading {}", name);
 
-    println!("is downloading {}", output_path);
-    let video_bytes = client
-        .get(&video_url)
-        .headers(headers.clone())
-        .send()
-        .await
-        .context("Failed to download video stream")?
-        .bytes()
-        .await
-        .context("Failed to read video stream data")?;
+    {
+        let video_resp = client
+            .get(&video_url)
+            .headers(headers.clone())
+            .send()
+            .await
+            .context("Failed to download video stream")?;
+        let total_size_video = video_resp.content_length().unwrap_or(0);
+        let pb_video = ProgressBar::new(total_size_video);
+        pb_video.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")?
+            .progress_chars("=> "),
+    );
+        let mut video_file = File::create(&video_path)?;
+        let mut video_downloaded: u64 = 0;
+        let mut video_stream = video_resp.bytes_stream();
+        while let Some(chunk) = video_stream.try_next().await? {
+            let chunk = chunk;
+            video_file.write_all(&chunk)?;
+            pb_video.inc(chunk.len() as u64);
+            video_downloaded += chunk.len() as u64;
+            pb_video.set_position(video_downloaded);
+        }
+        pb_video.finish_with_message("Downloaded video stream");
+    }
+    {
+        let audio_resp = client
+            .get(&audio_url)
+            .headers(headers.clone())
+            .send()
+            .await
+            .context("Failed to download audio stream")?;
+        let total_size_audio = audio_resp.content_length().unwrap_or(0);
+        let pb_audio = ProgressBar::new(total_size_audio);
+        pb_audio.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")?
+            .progress_chars("=> "),
+    );
+        let mut audio_file = File::create(&audio_path)?;
+        let mut audio_downloaded: u64 = 0;
+        let mut audio_stream = audio_resp.bytes_stream();
+        while let Some(chunk) = audio_stream.try_next().await? {
+            let chunk = chunk;
+            audio_file.write_all(&chunk)?;
+            pb_audio.inc(chunk.len() as u64);
+            audio_downloaded += chunk.len() as u64;
+            pb_audio.set_position(audio_downloaded);
+        }
 
-    let audio_bytes = client
-        .get(&audio_url)
-        .headers(headers.clone())
-        .send()
-        .await
-        .context("Failed to download audio stream")?
-        .bytes()
-        .await
-        .context("Failed to read audio stream data")?;
-
-    File::create(&video_path)
-        .and_then(|mut f| f.write_all(&video_bytes))
-        .context("Failed to save video file")?;
-
-    File::create(&audio_path)
-        .and_then(|mut f| f.write_all(&audio_bytes))
-        .context("Failed to save audio file")?;
-
+        pb_audio.finish_with_message("Downloaded audio stream");
+    }
     concat_video_audio(name.clone()).await?;
     println!("Concat completed for {}", name);
     Ok(())
@@ -179,7 +260,7 @@ async fn test_() {
     let x = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
         .await
         .unwrap();
-    download_file(&client, x, bv.title, headers).await.unwrap();
+    down_file_bv_(&client, x, bv.title, headers).await.unwrap();
 }
 
 async fn bv_down_main(bv_id: &str) -> Result<()> {
@@ -194,7 +275,7 @@ async fn bv_down_main(bv_id: &str) -> Result<()> {
     let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
         .await
         .context("Failed to get bv play url")?;
-    download_file(&client, play_url, bv.title, headers).await?;
+    down_file_bv_(&client, play_url, bv.title, headers).await?;
     Ok(())
 }
 

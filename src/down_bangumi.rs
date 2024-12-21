@@ -1,4 +1,6 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
+use futures_util::TryStreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serde_json::{self, Value};
@@ -94,7 +96,64 @@ fn get_file_url(response: &Value) -> Result<(String, String)> {
 }
 
 /// 下载视频文件
-async fn get_file(
+// async fn get_file(
+//     url_response: Value,
+//     name_response: Value,
+//     ep_id: &str,
+//     client: &Client,
+//     headers: HeaderMap,
+// ) -> Result<()> {
+//     let (url_video, url_audio) = get_file_url(&url_response)?;
+//     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
+//     let bangumi_name = remove_punctuation(&bangumi_name_temp);
+//     if !Path::new("./download").exists() {
+//         std::fs::create_dir_all("./download")?;
+//     }
+//     let video_path = format!("./download/{}_video.m4s", bangumi_name);
+//     let audio_path = format!("./download/{}_audio.m4s", bangumi_name);
+//     let output_path = format!("./download/{}.mp4", bangumi_name);
+
+//     if Path::new(&output_path).exists() {
+//         println!("{} already exists", bangumi_name);
+//         return Ok(());
+//     }
+
+//     println!("is downloading {}", bangumi_name);
+//     let video_bytes = client
+//         .get(&url_video)
+//         .headers(headers.clone())
+//         .send()
+//         .await
+//         .context("Failed to download video stream")?
+//         .bytes()
+//         .await
+//         .context("Failed to read video stream data")?;
+
+//     let audio_bytes = client
+//         .get(&url_audio)
+//         .headers(headers.clone())
+//         .send()
+//         .await
+//         .context("Failed to download audio stream")?
+//         .bytes()
+//         .await
+//         .context("Failed to read audio stream data")?;
+
+//     File::create(&video_path)
+//         .and_then(|mut f| f.write_all(&video_bytes))
+//         .context("Failed to save video file")?;
+
+//     File::create(&audio_path)
+//         .and_then(|mut f| f.write_all(&audio_bytes))
+//         .context("Failed to save audio file")?;
+
+//     concat_video_audio(bangumi_name.clone()).await?;
+//     println!("Concat completed for {}", bangumi_name);
+
+//     Ok(())
+// }
+
+async fn down_file_bangumi(
     url_response: Value,
     name_response: Value,
     ep_id: &str,
@@ -115,39 +174,63 @@ async fn get_file(
         println!("{} already exists", bangumi_name);
         return Ok(());
     }
+    println!("downloading {}", bangumi_name);
 
-    println!("is downloading {}", bangumi_name);
-    let video_bytes = client
-        .get(&url_video)
-        .headers(headers.clone())
-        .send()
-        .await
-        .context("Failed to download video stream")?
-        .bytes()
-        .await
-        .context("Failed to read video stream data")?;
+    {
+        let video_resp = client
+            .get(&url_video)
+            .headers(headers.clone())
+            .send()
+            .await
+            .context("Failed to download video stream")?;
+        let total_size_video = video_resp.content_length().unwrap_or(0);
+        let pb_video = ProgressBar::new(total_size_video);
+        pb_video.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")?
+            .progress_chars("=> "),
+    );
+        let mut video_file = File::create(&video_path)?;
+        let mut video_downloaded: u64 = 0;
+        let mut video_stream = video_resp.bytes_stream();
+        while let Some(chunk) = video_stream.try_next().await? {
+            let chunk = chunk;
+            video_file.write_all(&chunk)?;
+            pb_video.inc(chunk.len() as u64);
+            video_downloaded += chunk.len() as u64;
+            pb_video.set_position(video_downloaded);
+        }
+        pb_video.finish_with_message("Downloaded video stream");
+    }
+    {
+        let audio_resp = client
+            .get(&url_audio)
+            .headers(headers.clone())
+            .send()
+            .await
+            .context("Failed to download audio stream")?;
+        let total_size_audio = audio_resp.content_length().unwrap_or(0);
+        let pb_audio = ProgressBar::new(total_size_audio);
+        pb_audio.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")?
+            .progress_chars("=> "),
+    );
+        let mut audio_file = File::create(&audio_path)?;
+        let mut audio_downloaded: u64 = 0;
+        let mut audio_stream = audio_resp.bytes_stream();
+        while let Some(chunk) = audio_stream.try_next().await? {
+            let chunk = chunk;
+            audio_file.write_all(&chunk)?;
+            pb_audio.inc(chunk.len() as u64);
+            audio_downloaded += chunk.len() as u64;
+            pb_audio.set_position(audio_downloaded);
+        }
 
-    let audio_bytes = client
-        .get(&url_audio)
-        .headers(headers.clone())
-        .send()
-        .await
-        .context("Failed to download audio stream")?
-        .bytes()
-        .await
-        .context("Failed to read audio stream data")?;
-
-    File::create(&video_path)
-        .and_then(|mut f| f.write_all(&video_bytes))
-        .context("Failed to save video file")?;
-
-    File::create(&audio_path)
-        .and_then(|mut f| f.write_all(&audio_bytes))
-        .context("Failed to save audio file")?;
-
+        pb_audio.finish_with_message("Downloaded audio stream");
+    }
     concat_video_audio(bangumi_name.clone()).await?;
     println!("Concat completed for {}", bangumi_name);
-
     Ok(())
 }
 
@@ -166,6 +249,8 @@ pub async fn concat_video_audio(name: String) -> Result<()> {
         }
         let status = Command::new("ffmpeg")
             .args(&[
+                "-loglevel",
+                "error",
                 "-i",
                 name_video.as_str(),
                 "-i",
@@ -269,7 +354,7 @@ async fn down_season(
     name_response: Value,
 ) -> Result<()> {
     let url_response = get_playurl(&client, &ep_id_cp, "", headers.clone()).await?;
-    get_file(
+    down_file_bangumi(
         url_response,
         name_response.clone(),
         &ep_id_cp,
@@ -301,7 +386,7 @@ async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
         }
     } else {
         let url_response = get_playurl(&client, &ep_id, "", headers.clone()).await?;
-        get_file(url_response, name_response, ep_id, &client, headers).await?;
+        down_file_bangumi(url_response, name_response, ep_id, &client, headers).await?;
     }
     Ok(())
 }
