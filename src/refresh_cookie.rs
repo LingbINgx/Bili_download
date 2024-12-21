@@ -28,7 +28,7 @@ pub struct Cookies {
 
 /// 刷新cookie接口逻辑
 pub async fn refresh_cookie(client: &Client) -> Result<bool> {
-    let path = Path::new("cookie.txt");
+    let path = Path::new("load");
     let cookie = read_cookie(path);
     let (code, refresh, timestamp) =
         is_need_refresh(client, &cookie)
@@ -239,7 +239,7 @@ async fn test_csrf() {
         .build()
         .unwrap();
 
-    let path = Path::new("cookie.txt");
+    let path = Path::new("load");
     let cookie = read_cookie(path);
     let (x, y, timestamp) = is_need_refresh(&client, &cookie).await.unwrap();
     //let timestamp = "1734095039907";

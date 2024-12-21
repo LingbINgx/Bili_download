@@ -136,7 +136,7 @@ fn save_cookie(cookie: String) -> Result<bool> {
         let value = encode(kv[1]).into_owned().to_string(); // url编码
         map.insert(key, value);
     }
-    let mut file = std::fs::File::create("cookie.txt")?;
+    let mut file = std::fs::File::create("load")?;
     let serialized_map = serde_json::to_string(&map)?;
     file.write_all(serialized_map.as_bytes())?;
     Ok(true)

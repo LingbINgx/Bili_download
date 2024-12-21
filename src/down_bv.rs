@@ -172,7 +172,7 @@ async fn down_file_bv_(
 #[tokio::test]
 async fn test_() {
     let client = reqwest::Client::new();
-    let path = Path::new("cookie.text");
+    let path = Path::new("load");
     let cookies = read_cookie_or_not(path).await.unwrap();
     let headers = create_headers(&cookies);
 
@@ -189,7 +189,7 @@ async fn test_() {
 
 async fn bv_down_main(bv_id: &str) -> Result<()> {
     let client = reqwest::Client::new();
-    let path = Path::new("cookie.txt");
+    let path = Path::new("load");
     let cookies = read_cookie_or_not(path).await?;
     let headers = create_headers(&cookies);
     let bv = get_bv_cid_title(&client, bv_id, headers.clone())

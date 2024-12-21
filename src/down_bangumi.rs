@@ -287,7 +287,7 @@ async fn down_season(
 /// 下载番剧总函数
 async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
     let client = reqwest::Client::new();
-    let path = Path::new("./cookie.txt");
+    let path = Path::new("./load");
     let cookie = read_cookie_or_not(&path).await?;
     let headers = create_headers(&cookie);
     let name_response = get_bangumi_name(&client, &ep_id, &season_id, headers.clone()).await?;
