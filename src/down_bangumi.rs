@@ -1,4 +1,5 @@
 use anyhow::{Context, Ok, Result};
+use chrono::Utc;
 use futures_util::TryStreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::HeaderMap;
@@ -128,6 +129,22 @@ async fn down_file_bangumi(
     let (url_video, url_audio) = get_file_url(&url_response)?;
     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
+
+    let time = Utc::now() + chrono::Duration::hours(8);
+    let time_ = time.format("%Y-%m-%d %H:%M:%S");
+    let data = format!("{}\tep{}\t{}\t\n", time_, ep_id, bangumi_name);
+    let path = Path::new("dat.log");
+    if !path.exists() {
+        let mut file = tokio::fs::File::create(path).await?;
+        file.write_all(data.as_bytes()).await?;
+    } else {
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .await?;
+        file.write_all(data.as_bytes()).await?;
+    }
+
     if !Path::new("./download").exists() {
         std::fs::create_dir_all("./download")?;
     }
@@ -190,6 +207,7 @@ pub async fn concat_video_audio(name: String) -> Result<()> {
                 "-loglevel",
                 "error",
             ])
+            .stdin(std::process::Stdio::null())
             .status()
             .await
             .expect("Failed to execute ffmpeg");
