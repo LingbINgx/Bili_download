@@ -7,7 +7,6 @@ mod down_bangumi;
 mod down_bv;
 mod refresh_cookie;
 mod wbi;
-
 #[derive(Debug)]
 struct Video {
     ep_id: String,

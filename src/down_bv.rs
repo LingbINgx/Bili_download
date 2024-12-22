@@ -2,6 +2,7 @@ use crate::down_bangumi::{concat_video_audio, read_cookie_or_not, remove_punctua
 use crate::refresh_cookie::create_headers;
 use crate::wbi::get_wbi_keys_main;
 use anyhow::{Context, Ok, Result};
+use chrono::Utc;
 use futures_util::TryStreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::HeaderMap;
@@ -12,6 +13,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Deserialize, Debug)]
 struct BV {
@@ -169,23 +171,23 @@ async fn down_file_bv_(
     Ok(())
 }
 
-#[tokio::test]
-async fn test_() {
-    let client = reqwest::Client::new();
-    let path = Path::new("load");
-    let cookies = read_cookie_or_not(path).await.unwrap();
-    let headers = create_headers(&cookies);
+// #[tokio::test]
+// async fn test_() {
+//     let client = reqwest::Client::new();
+//     let path = Path::new("load");
+//     let cookies = read_cookie_or_not(path).await.unwrap();
+//     let headers = create_headers(&cookies);
 
-    let bv_id = "BV1yaBKYfE2D";
-    let bv = get_bv_cid_title(&client, bv_id, headers.clone())
-        .await
-        .unwrap();
-    print!("{:#?}\n", bv);
-    let x = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
-        .await
-        .unwrap();
-    down_file_bv_(&client, x, bv.title, headers).await.unwrap();
-}
+//     let bv_id = "BV1yaBKYfE2D";
+//     let bv = get_bv_cid_title(&client, bv_id, headers.clone())
+//         .await
+//         .unwrap();
+//     print!("{:#?}\n", bv);
+//     let x = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
+//         .await
+//         .unwrap();
+//     down_file_bv_(&client, x, bv.title, headers).await.unwrap();
+// }
 
 async fn bv_down_main(bv_id: &str) -> Result<()> {
     let client = reqwest::Client::new();
@@ -199,6 +201,20 @@ async fn bv_down_main(bv_id: &str) -> Result<()> {
     let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
         .await
         .context("Failed to get bv play url")?;
+    let time = Utc::now() + chrono::Duration::hours(8);
+    let time_ = time.format("%Y-%m-%d %H:%M:%S");
+    let data = format!("{}\t{}\t{}\t\n", time_, bv.bv_id, bv.title);
+    let path = Path::new("dat.log");
+    if !path.exists() {
+        let mut file = tokio::fs::File::create(path).await?;
+        file.write_all(data.as_bytes()).await?;
+    } else {
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .await?;
+        file.write_all(data.as_bytes()).await?;
+    }
     down_file_bv_(&client, play_url, bv.title, headers).await?;
     Ok(())
 }
