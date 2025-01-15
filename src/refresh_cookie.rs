@@ -1,21 +1,19 @@
 use anyhow::{Ok, Result};
-//use curl::easy::{Easy, List};
-//use hex;
+use chrono::{DateTime, TimeZone, Utc};
+use hex;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
-//use rsa::RsaPublicKey;
-//use rsa::{pkcs8::DecodePublicKey, Oaep};
-//use scraper::{Html, Selector};
+use rsa::RsaPublicKey;
+use rsa::{pkcs8::DecodePublicKey, Oaep};
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
-//use sha2::Sha256;
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::fs::File;
-//use std::io::{self, Read, Write};
 use std::io::Read;
 use std::path::Path;
-//use std::process::Command;
-use chrono::{DateTime, TimeZone, Utc};
+use std::process::Command;
 
 #[derive(Serialize, Deserialize)]
 #[allow(non_snake_case)]
@@ -136,82 +134,6 @@ async fn get_refresh_csrf(
     client: &Client,
     cookie: &Cookies,
 ) -> Result<String, anyhow::Error> {
-    let url: String = format!("https://www.bilibili.com/correspond/1/{}", correspond_path);
-    //let url = "https://www.bilibili.com".to_string();
-    println!("{}\n", url);
-    let headers = create_headers(cookie);
-    let mut params: HashMap<&str, &str> = HashMap::new();
-    params.insert("csrf", cookie.bili_jct.as_str());
-
-    let resp = client
-        .get(&url)
-        .headers(headers)
-        //.query(&params)
-        .send()
-        //.await?
-        //.text()
-        .await?;
-
-    println!("{:?}\n", resp);
-    let resp = resp.text().await?;
-    println!("{:?}\n", resp);
-    let document = Html::parse_document(&resp);
-    println!("{:?}\n", document);
-    let selector = Selector::parse("#1-name").expect("Invalid CSS selector");
-
-    //println!("1-name: {:?}", selector);
-    // 查找对应的元素并提取文本
-    if let Some(element) = document.select(&selector).next() {
-        let csrf = element.text().collect::<Vec<_>>().concat();
-        println!("csrf: {}", csrf);
-        return Ok(csrf);
-    } else {
-        return Err(anyhow::anyhow!("CSRF token not found"));
-    }
-    Ok("".to_string())
-    -------------------------------------------
-    let output = Command::new("curl")
-        .arg("-G")
-        .arg(&url)
-        .arg("-b")
-        .arg(format!("SESSDATA={}", &cookie.SESSDATA))
-        .output()
-        .expect("Failed to execute curl command");
-
-    if !output.status.success() {
-        eprintln!("Error: {}", String::from_utf8_lossy(&output.stderr));
-    }
-
-    // 打印响应内容
-    println!("Response: {}\n", String::from_utf8_lossy(&output.stdout));
-    //Ok("".to_string())
-
-    //-------------------------------------------
-    let mut easy = Easy::new();
-
-    // 设置 URL
-    easy.url(&url)?;
-
-    // 设置请求头（例如设置 Cookie）
-    let mut headers = List::new();
-    headers.append(&format!("Cookie: SESSDATA={}", cookie.SESSDATA))?;
-    easy.http_headers(headers)?;
-
-    // 执行请求
-    let mut response_data = Vec::new();
-    {
-        let mut transfer = easy.transfer();
-        transfer.write_function(|data| {
-            response_data.extend_from_slice(data);
-            Result::Ok(data.len())
-        })?;
-        transfer.perform()?;
-    }
-
-    // 打印响应内容
-    let response_text = String::from_utf8_lossy(&response_data);
-    println!("\nResponse: {}", response_text);
-
     Ok("".to_string())
 }
 

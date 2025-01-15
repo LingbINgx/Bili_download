@@ -189,7 +189,7 @@ async fn down_file_bv_(
 //     down_file_bv_(&client, x, bv.title, headers).await.unwrap();
 // }
 
-async fn bv_down_main(bv_id: &str) -> Result<()> {
+async fn bv_down_main(bv_id: &str) -> Result<String> {
     let client = reqwest::Client::new();
     let path = Path::new("load");
     let cookies = read_cookie_or_not(path).await?;
@@ -198,9 +198,7 @@ async fn bv_down_main(bv_id: &str) -> Result<()> {
         .await
         .context("Failed to get bv cid title")?;
     println!("{:#?}", bv);
-    let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
-        .await
-        .context("Failed to get bv play url")?;
+
     let time = Utc::now() + chrono::Duration::hours(8);
     let time_ = time.format("%Y-%m-%d %H:%M:%S");
     let data = format!("{}\t{}\t{}\t\n", time_, bv.bv_id, bv.title);
@@ -215,11 +213,39 @@ async fn bv_down_main(bv_id: &str) -> Result<()> {
             .await?;
         file.write_all(data.as_bytes()).await?;
     }
-    down_file_bv_(&client, play_url, bv.title, headers).await?;
-    Ok(())
+    let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
+        .await
+        .context("Failed to get bv play url")?;
+    down_file_bv_(&client, play_url, bv.title.clone(), headers).await?;
+    Ok(bv.title)
 }
 
-pub async fn down_main(bv_id: &str) -> Result<()> {
-    bv_down_main(bv_id).await?;
-    Ok(())
+pub async fn down_main(bv_id: &str) -> Result<String> {
+    let title = bv_down_main(bv_id).await?;
+    Ok(title)
+}
+
+pub async fn bv_title(bv_id: &str) -> Result<(String, String)> {
+    let client = reqwest::Client::new();
+    let path = Path::new("load");
+    let cookies = read_cookie_or_not(path).await?;
+    let headers = create_headers(&cookies);
+    let url = "https://api.bilibili.com/x/web-interface/wbi/view";
+    let params: HashMap<&str, &str> = [("bvid", bv_id)].iter().cloned().collect();
+    let resp = client
+        .get(url)
+        .headers(headers)
+        .query(&params)
+        .send()
+        .await?
+        .text()
+        .await?;
+    let json: Value = serde_json::from_str(&resp)?;
+    let title = json["data"]["title"]
+        .as_str()
+        .unwrap_or("no title")
+        .to_string();
+    let pic = json["data"]["pic"].as_str().unwrap_or("no pic").to_string();
+    let title = remove_punctuation(&title);
+    Ok((title, pic))
 }

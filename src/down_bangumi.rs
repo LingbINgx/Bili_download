@@ -263,6 +263,21 @@ fn get_bangumi_name_from_json(json: Value, ep_id: &str) -> String {
     bangumi_name.to_string()
 }
 
+///
+fn get_bangumi_pic(json: Value, ep_id: &str) -> String {
+    let ep_id = ep_id.parse::<i64>().unwrap();
+    let ep_id_index: usize = json["result"]["episodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|episode| episode["ep_id"].as_i64().unwrap_or(0) == ep_id)
+        .unwrap_or(0);
+    let bangumi_pic = json["result"]["episodes"][ep_id_index]["cover"]
+        .as_str()
+        .unwrap();
+    bangumi_pic.to_string()
+}
+
 /// 去除文件名字符串中的windows不允许的标点符号
 pub fn remove_punctuation(input: &str) -> String {
     let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
@@ -332,4 +347,16 @@ async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
         down_file_bangumi(url_response, name_response, ep_id, &client, headers).await?;
     }
     Ok(())
+}
+
+pub async fn bangumi_title(ep_id: &str, season_id: &str) -> Result<(String, String)> {
+    let client = reqwest::Client::new();
+    let path = Path::new("./load");
+    let cookie = read_cookie_or_not(&path).await?;
+    let headers = create_headers(&cookie);
+    let name_response = get_bangumi_name(&client, &ep_id, &season_id, headers.clone()).await?;
+    let bangumi_name_temp = get_bangumi_name_from_json(name_response.clone(), ep_id);
+    let bangumi_name = remove_punctuation(&bangumi_name_temp);
+    let bangumi_pic = get_bangumi_pic(name_response, ep_id);
+    Ok((bangumi_name, bangumi_pic))
 }
