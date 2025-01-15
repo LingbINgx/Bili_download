@@ -171,24 +171,6 @@ async fn down_file_bv_(
     Ok(())
 }
 
-// #[tokio::test]
-// async fn test_() {
-//     let client = reqwest::Client::new();
-//     let path = Path::new("load");
-//     let cookies = read_cookie_or_not(path).await.unwrap();
-//     let headers = create_headers(&cookies);
-
-//     let bv_id = "BV1yaBKYfE2D";
-//     let bv = get_bv_cid_title(&client, bv_id, headers.clone())
-//         .await
-//         .unwrap();
-//     print!("{:#?}\n", bv);
-//     let x = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
-//         .await
-//         .unwrap();
-//     down_file_bv_(&client, x, bv.title, headers).await.unwrap();
-// }
-
 async fn bv_down_main(bv_id: &str) -> Result<String> {
     let client = reqwest::Client::new();
     let path = Path::new("load");
@@ -247,5 +229,19 @@ pub async fn bv_title(bv_id: &str) -> Result<(String, String)> {
         .to_string();
     let pic = json["data"]["pic"].as_str().unwrap_or("no pic").to_string();
     let title = remove_punctuation(&title);
+    get_pic(&pic).await?;
     Ok((title, pic))
+}
+
+pub async fn get_pic(pic: &str) -> Result<()> {
+    let client = reqwest::Client::new();
+    let path = Path::new("load");
+    let cookies = read_cookie_or_not(path).await?;
+    let headers = create_headers(&cookies);
+    let resp = client.get(pic).headers(headers).send().await?;
+    let bytes = resp.bytes().await?;
+    let path = Path::new("pic.png");
+    let mut file = tokio::fs::File::create(path).await?;
+    file.write_all(&bytes).await?;
+    Ok(())
 }

@@ -11,6 +11,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
+use crate::down_bv::get_pic;
 use crate::refresh_cookie::{create_headers, Cookies};
 
 pub async fn down_main((ep_id, season_id): (&str, &str)) -> Result<()> {
@@ -358,5 +359,6 @@ pub async fn bangumi_title(ep_id: &str, season_id: &str) -> Result<(String, Stri
     let bangumi_name_temp = get_bangumi_name_from_json(name_response.clone(), ep_id);
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
     let bangumi_pic = get_bangumi_pic(name_response, ep_id);
+    get_pic(&bangumi_pic).await?;
     Ok((bangumi_name, bangumi_pic))
 }

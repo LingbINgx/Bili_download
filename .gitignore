@@ -3,3 +3,5 @@
 load
 dat.log
 Cargo.lock
+output.png
+pic.png
