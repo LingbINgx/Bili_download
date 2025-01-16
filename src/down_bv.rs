@@ -1,5 +1,6 @@
 use crate::down_bangumi::{concat_video_audio, read_cookie_or_not, remove_punctuation};
 use crate::refresh_cookie::create_headers;
+use crate::resolution;
 use crate::wbi::get_wbi_keys_main;
 use anyhow::{Context, Ok, Result};
 use chrono::Utc;
@@ -27,14 +28,19 @@ async fn get_bv_play_url(
     bv_id: &str,
     cid: &str,
     headers: HeaderMap,
+    rsl: &str,
 ) -> Result<Value> {
     let url = "https://api.bilibili.com/x/player/wbi/playurl";
     let wbi_keys = get_wbi_keys_main().await?;
+    let qn = resolution::qn(rsl);
+    let fnval = resolution::fnval(rsl);
+    println!("fnval: {}", fnval);
+    println!("qn: {}", qn);
     let params: HashMap<&str, &str> = [
         ("bvid", bv_id),
         ("cid", cid),
-        ("qn", "112"),
-        ("fnval", "16"),
+        ("qn", qn),
+        ("fnval", fnval),
         ("fnver", "0"),
         ("fourk", "1"),
         ("session", ""),
@@ -87,15 +93,19 @@ async fn get_bv_cid_title(client: &Client, bv: &str, headers: HeaderMap) -> Resu
     Ok(bv)
 }
 
-fn get_bv_url(play_url: &Value) -> Result<(String, String)> {
+fn get_bv_url(play_url: &Value, rsl: &str) -> Result<(String, String, i32)> {
+    let qn: i32 = resolution::qn(rsl).parse().unwrap();
     let video_index = play_url["data"]["dash"]["video"]
         .as_array()
         .context("Missing or invalid video array in response JSON")?
         .iter()
         .enumerate()
-        .max_by_key(|(_, v)| v["bandwidth"].as_i64().unwrap_or(0))
-        .map(|(i, _)| i)
-        .context("No valid video streams found")?;
+        .filter(|(_, v)| v["id"] == qn)
+        .max_by_key(|(_, v)| v["bandwidth"].as_u64().unwrap_or(0))
+        .map(|(index, _)| index)
+        .unwrap_or(1);
+    println!("video_index: {}", video_index);
+
     let audio_index = play_url["data"]["dash"]["audio"]
         .as_array()
         .context("Missing or invalid audio array in response JSON")?
@@ -104,6 +114,8 @@ fn get_bv_url(play_url: &Value) -> Result<(String, String)> {
         .max_by_key(|(_, v)| v["bandwidth"].as_i64().unwrap_or(0))
         .map(|(i, _)| i)
         .context("No valid audio streams found")?;
+    println!("audio_index: {}", audio_index);
+
     let video_url = play_url["data"]["dash"]["video"][video_index]["baseUrl"]
         .as_str()
         .unwrap_or("")
@@ -112,7 +124,10 @@ fn get_bv_url(play_url: &Value) -> Result<(String, String)> {
         .as_str()
         .unwrap_or("")
         .to_string();
-    Ok((video_url, audio_url))
+    let qn = play_url["data"]["dash"]["video"][video_index]["id"]
+        .as_i64()
+        .unwrap_or(0) as i32;
+    Ok((video_url, audio_url, qn))
 }
 
 async fn down_file_url(url: &str, client: Client, headers: HeaderMap, path: &str) -> Result<()> {
@@ -145,12 +160,22 @@ async fn down_file_bv_(
     url: Value,
     name: String,
     headers: HeaderMap,
+    rsl: &str,
 ) -> Result<()> {
-    let (video_url, audio_url) = get_bv_url(&url).unwrap();
+    let (video_url, audio_url, qn) = get_bv_url(&url, rsl).unwrap();
+
+    let qn_c = resolution::qn(rsl);
+    if qn != qn_c.parse::<i32>().unwrap() {
+        println!("此分辨率不存在，将下载默认分辨率");
+    }
+    let qn_str = qn.to_string();
+    let rsl = resolution::rsl(&qn_str);
 
     if !Path::new("./download").exists() {
         std::fs::create_dir_all("./download")?;
     }
+
+    let name = format!("{} {}", name, rsl);
     let video_path = format!("./download/{}_video.m4s", name);
     let audio_path = format!("./download/{}_audio.m4s", name);
     let output_path = format!("./download/{}.mp4", name);
@@ -165,13 +190,12 @@ async fn down_file_bv_(
     for (url, path) in urls {
         down_file_url(&url, client.clone(), headers.clone(), &path).await?;
     }
-
     concat_video_audio(name.clone()).await?;
     println!("Concat completed for {}", name);
     Ok(())
 }
 
-async fn bv_down_main(bv_id: &str) -> Result<String> {
+async fn bv_down_main(bv_id: &str, rsl: &str) -> Result<String> {
     let client = reqwest::Client::new();
     let path = Path::new("load");
     let cookies = read_cookie_or_not(path).await?;
@@ -195,15 +219,15 @@ async fn bv_down_main(bv_id: &str) -> Result<String> {
             .await?;
         file.write_all(data.as_bytes()).await?;
     }
-    let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone())
+    let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone(), rsl)
         .await
         .context("Failed to get bv play url")?;
-    down_file_bv_(&client, play_url, bv.title.clone(), headers).await?;
+    down_file_bv_(&client, play_url, bv.title.clone(), headers, rsl).await?;
     Ok(bv.title)
 }
 
-pub async fn down_main(bv_id: &str) -> Result<String> {
-    let title = bv_down_main(bv_id).await?;
+pub async fn down_main(bv_id: &str, rsl: &str) -> Result<String> {
+    let title = bv_down_main(bv_id, rsl).await?;
     Ok(title)
 }
 

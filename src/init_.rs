@@ -51,12 +51,12 @@ pub fn get_epid_season(url: &str) -> Result<Video> {
     }
 }
 
-pub async fn choose_download_method(video: &Video) -> Result<String> {
+pub async fn choose_download_method(video: &Video, rsl: &str) -> Result<String> {
     let mut title = String::new();
     if !video.ep_id.is_empty() || !video.season_id.is_empty() {
-        down_bangumi::down_main((&video.ep_id, &video.season_id)).await?;
+        down_bangumi::down_main((&video.ep_id, &video.season_id), rsl).await?;
     } else if !video.bv_id.is_empty() {
-        title = down_bv::down_main(&video.bv_id).await?;
+        title = down_bv::down_main(&video.bv_id, rsl).await?;
     } else {
         Err(anyhow::anyhow!("No valid video ID found"))?;
     }

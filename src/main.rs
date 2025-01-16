@@ -13,6 +13,7 @@ mod refresh_cookie;
 mod wbi;
 use eframe::egui;
 use eframe::egui::{ComboBox, FontDefinitions, FontFamily, ProgressBar, Vec2};
+mod resolution;
 
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {
@@ -36,10 +37,12 @@ impl MyApp {
             resolutions: vec![
                 "HDR".to_string(),
                 "4K".to_string(),
-                "1080p+".to_string(),
-                "1080p".to_string(),
-                "720p".to_string(),
-                "480p".to_string(),
+                "1080P+".to_string(),
+                "1080P60".to_string(),
+                "1080P".to_string(),
+                "720P".to_string(),
+                "480P".to_string(),
+                "360P".to_string(),
             ],
             info: String::new(),
             pic: false,
@@ -83,16 +86,17 @@ impl MyApp {
         };
         println!("{:?}", video);
         let mutex_info = Arc::clone(&self.mutex_info);
+        let rsl = self.selected_resolution.clone();
         tokio::spawn(async move {
             match init_::get_title_pic(&video).await {
-                Ok((t, p)) => {
+                Ok((t, _)) => {
                     let mut lock_t = mutex_info.lock().await;
                     *lock_t = t;
                 }
                 Err(e) => eprintln!("Error occurred: {}", e),
             }
 
-            let result = init_::choose_download_method(&video).await;
+            let result = init_::choose_download_method(&video, &rsl).await;
             match result {
                 Ok(title) => {
                     println!("Download completed for {}", title);
@@ -100,8 +104,8 @@ impl MyApp {
                 Err(e) => eprintln!("Error occurred: {}", e),
             }
         });
-        let x = &self.mutex_info;
-        println!("aaa{:?}", x);
+        //let x = &self.mutex_info;
+        //println!("aaa{:?}", x);
     }
 }
 
@@ -164,6 +168,7 @@ impl eframe::App for MyApp {
                     .add_sized(button_size, egui::Button::new("下载"))
                     .clicked()
                 {
+                    println!("分辨率:{}", self.selected_resolution);
                     self.handle_down();
                 }
             });
@@ -236,7 +241,7 @@ fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "my_font".to_owned(),
-        egui::FontData::from_static(include_bytes!("C:\\Windows\\Fonts\\msyh.ttc")),
+        egui::FontData::from_static(include_bytes!("D:\\精简版微软雅黑TTF.ttf")),
     );
     fonts
         .families

@@ -13,22 +13,33 @@ use tokio::process::Command;
 
 use crate::down_bv::get_pic;
 use crate::refresh_cookie::{create_headers, Cookies};
+use crate::resolution;
 
-pub async fn down_main((ep_id, season_id): (&str, &str)) -> Result<()> {
-    download_bangumi(ep_id, season_id).await?;
+pub async fn down_main((ep_id, season_id): (&str, &str), rsl: &str) -> Result<()> {
+    download_bangumi(ep_id, season_id, rsl).await?;
     Ok(())
 }
 
 /// 获取视频播放地址
-async fn get_playurl(client: &Client, ep_id: &str, cid: &str, headers: HeaderMap) -> Result<Value> {
+async fn get_playurl(
+    client: &Client,
+    ep_id: &str,
+    cid: &str,
+    headers: HeaderMap,
+    rsl: &str,
+) -> Result<Value> {
     let url = "https://api.bilibili.com/pgc/player/web/playurl";
+    let qn = resolution::qn(rsl);
+    let fnval = resolution::fnval(rsl);
+    println!("fnval: {}", fnval);
+    println!("qn: {}", qn);
     let params: HashMap<&str, &str> = [
         ("avid", ""),
         ("bvid", ""),
         ("ep_id", ep_id),
         ("cid", cid),
-        ("qn", "112"),
-        ("fnval", "16"),
+        ("qn", qn),
+        ("fnval", fnval),
         ("fnver", "0"),
         ("fourk", "1"),
         ("session", ""),
@@ -58,15 +69,19 @@ async fn get_playurl(client: &Client, ep_id: &str, cid: &str, headers: HeaderMap
 }
 
 /// 获取json文件中的视频文件地址
-fn get_file_url(response: &Value) -> Result<(String, String)> {
+fn get_file_url(response: &Value, rsl: &str) -> Result<(String, String, i32)> {
+    let qn: i32 = resolution::qn(rsl).parse().unwrap();
+    println!("get file url qn: {}", qn);
     let video_index = response["result"]["dash"]["video"]
         .as_array()
         .context("Missing or invalid video array in response JSON")?
-        .iter() //迭代器
-        .enumerate() //枚举
-        .max_by_key(|(_, v)| v["size"].as_i64().unwrap_or(0)) // 索引 键值，根据size排序
-        .map(|(i, _)| i)
-        .context("No valid video streams found")?;
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v["id"] == qn)
+        .max_by_key(|(_, v)| v["bandwidth"].as_u64().unwrap_or(0))
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    println!("video_index: {}", video_index);
 
     let audio_index = response["result"]["dash"]["audio"]
         .as_array()
@@ -77,16 +92,19 @@ fn get_file_url(response: &Value) -> Result<(String, String)> {
         .map(|(i, _)| i)
         .context("No valid audio streams found")?;
 
-    let url_video = response["result"]["dash"]["video"][video_index]["backupUrl"]
-        .get(0)
-        .and_then(|u| u.as_str())
-        .context("No backup URL found for video stream")?;
-    let url_audio = response["result"]["dash"]["audio"][audio_index]["backupUrl"]
-        .get(0)
-        .and_then(|u| u.as_str())
-        .context("No backup URL found for audio stream")?;
+    let url_video = response["result"]["dash"]["video"][video_index]["baseUrl"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let url_audio = response["result"]["dash"]["audio"][audio_index]["baseUrl"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let qn = response["result"]["dash"]["video"][video_index]["id"]
+        .as_i64()
+        .unwrap_or(0) as i32;
 
-    Ok((url_video.to_string(), url_audio.to_string()))
+    Ok((url_video.to_string(), url_audio.to_string(), qn))
 }
 
 async fn down_from_url(url: &str, client: Client, headers: HeaderMap, path: &str) -> Result<()> {
@@ -126,10 +144,20 @@ async fn down_file_bangumi(
     ep_id: &str,
     client: &Client,
     headers: HeaderMap,
+    rsl: &str,
 ) -> Result<()> {
-    let (url_video, url_audio) = get_file_url(&url_response)?;
+    let (url_video, url_audio, qn) = get_file_url(&url_response, rsl)?;
+    let qn_c = resolution::qn(rsl);
+    if qn != qn_c.parse::<i32>().unwrap() {
+        println!("此分辨率不存在，将下载默认分辨率");
+    }
+    let qn_str = qn.to_string();
+    let rsl = resolution::rsl(&qn_str);
+
     let bangumi_name_temp = get_bangumi_name_from_json(name_response, ep_id);
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
+
+    let bangumi_name = format!("{} {}", bangumi_name, rsl);
 
     let time = Utc::now() + chrono::Duration::hours(8);
     let time_ = time.format("%Y-%m-%d %H:%M:%S");
@@ -311,21 +339,23 @@ async fn down_season(
     client: &Client,
     headers: HeaderMap,
     name_response: Value,
+    rsl: &str,
 ) -> Result<()> {
-    let url_response = get_playurl(&client, &ep_id_cp, "", headers.clone()).await?;
+    let url_response = get_playurl(&client, &ep_id_cp, "", headers.clone(), rsl).await?;
     down_file_bangumi(
         url_response,
         name_response.clone(),
         &ep_id_cp,
         &client,
         headers.clone(),
+        rsl,
     )
     .await?;
     Ok(())
 }
 
 /// 下载番剧总函数
-async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
+async fn download_bangumi(ep_id: &str, season_id: &str, rsl: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let path = Path::new("./load");
     let cookie = read_cookie_or_not(&path).await?;
@@ -341,11 +371,19 @@ async fn download_bangumi(ep_id: &str, season_id: &str) -> Result<()> {
                 .as_i64()
                 .unwrap_or(0)
                 .to_string();
-            down_season(ep_id_cp, &client, headers.clone(), name_response.clone()).await?;
+            down_season(
+                ep_id_cp,
+                &client,
+                headers.clone(),
+                name_response.clone(),
+                rsl,
+            )
+            .await?;
         }
     } else {
-        let url_response = get_playurl(&client, &ep_id, "", headers.clone()).await?;
-        down_file_bangumi(url_response, name_response, ep_id, &client, headers).await?;
+        let url_response = get_playurl(&client, &ep_id, "", headers.clone(), rsl).await?;
+        //println!("{:#}", url_response);
+        down_file_bangumi(url_response, name_response, ep_id, &client, headers, rsl).await?;
     }
     Ok(())
 }
@@ -356,9 +394,23 @@ pub async fn bangumi_title(ep_id: &str, season_id: &str) -> Result<(String, Stri
     let cookie = read_cookie_or_not(&path).await?;
     let headers = create_headers(&cookie);
     let name_response = get_bangumi_name(&client, &ep_id, &season_id, headers.clone()).await?;
-    let bangumi_name_temp = get_bangumi_name_from_json(name_response.clone(), ep_id);
+    let mut bangumi_name_temp = String::new();
+    let mut bangumi_pic = String::new();
+    if ep_id != "" {
+        bangumi_name_temp = get_bangumi_name_from_json(name_response.clone(), ep_id);
+        bangumi_pic = get_bangumi_pic(name_response, ep_id);
+    } else {
+        bangumi_pic = name_response["result"]["cover"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        bangumi_name_temp = name_response["result"]["title"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+    }
+
     let bangumi_name = remove_punctuation(&bangumi_name_temp);
-    let bangumi_pic = get_bangumi_pic(name_response, ep_id);
     get_pic(&bangumi_pic).await?;
     Ok((bangumi_name, bangumi_pic))
 }
