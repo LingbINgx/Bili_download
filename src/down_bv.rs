@@ -161,6 +161,7 @@ async fn down_file_bv_(
     name: String,
     headers: HeaderMap,
     rsl: &str,
+    bv_id: &str,
 ) -> Result<()> {
     let (video_url, audio_url, qn) = get_bv_url(&url, rsl).unwrap();
 
@@ -179,6 +180,21 @@ async fn down_file_bv_(
     let video_path = format!("./download/{}_video.m4s", name);
     let audio_path = format!("./download/{}_audio.m4s", name);
     let output_path = format!("./download/{}.mp4", name);
+
+    let time = Utc::now() + chrono::Duration::hours(8);
+    let time_ = time.format("%Y-%m-%d %H:%M:%S");
+    let data = format!("{}\t{}\t{}\t\n", time_, bv_id, name);
+    let path = Path::new("dat.log");
+    if !path.exists() {
+        let mut file = tokio::fs::File::create(path).await?;
+        file.write_all(data.as_bytes()).await?;
+    } else {
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .await?;
+        file.write_all(data.as_bytes()).await?;
+    }
 
     if Path::new(&output_path).exists() {
         println!("{} already exists", output_path);
@@ -205,24 +221,10 @@ async fn bv_down_main(bv_id: &str, rsl: &str) -> Result<String> {
         .context("Failed to get bv cid title")?;
     println!("{:#?}", bv);
 
-    let time = Utc::now() + chrono::Duration::hours(8);
-    let time_ = time.format("%Y-%m-%d %H:%M:%S");
-    let data = format!("{}\t{}\t{}\t\n", time_, bv.bv_id, bv.title);
-    let path = Path::new("dat.log");
-    if !path.exists() {
-        let mut file = tokio::fs::File::create(path).await?;
-        file.write_all(data.as_bytes()).await?;
-    } else {
-        let mut file = tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(path)
-            .await?;
-        file.write_all(data.as_bytes()).await?;
-    }
     let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone(), rsl)
         .await
         .context("Failed to get bv play url")?;
-    down_file_bv_(&client, play_url, bv.title.clone(), headers, rsl).await?;
+    down_file_bv_(&client, play_url, bv.title.clone(), headers, rsl, &bv.bv_id).await?;
     Ok(bv.title)
 }
 
