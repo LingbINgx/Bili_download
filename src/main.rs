@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use core::f32;
 use reqwest::Client;
 use std::sync::Arc;
-use std::{io, result};
+use std::{io, path::Path, result};
 use tokio::sync::Mutex;
 mod down_bangumi;
 mod down_bv;
@@ -208,11 +208,16 @@ impl eframe::App for MyApp {
                     ui.label("封面:");
                     //println!("pic:{}", self.pic);
                     if self.pic {
-                        ui.add(
-                            egui::Image::new(egui::include_image!("../pic.png"))
-                                .max_width(200.0)
-                                .rounding(10.0),
-                        );
+                        let path = Path::new("../pic.png");
+                        if path.exists() {
+                            ui.add(
+                                egui::Image::new(egui::include_image!("..\\pic.png"))
+                                    .max_width(200.0)
+                                    .rounding(10.0),
+                            );
+                        } else {
+                            ui.label("no download picture");
+                        }
                     } else {
                         ui.label("no picture");
                     }
