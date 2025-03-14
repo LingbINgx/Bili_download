@@ -271,7 +271,7 @@ async fn get_bangumi_name(
         .send()
         .await?;
     let resp_text = response.text().await?;
-    let resp_text_str = std::str::from_utf8(resp_text.as_bytes()).unwrap();
+    let resp_text_str = std::str::from_utf8(resp_text.as_bytes()).unwrap_or("");
     let resp_json: Value = serde_json::from_str(resp_text_str)?;
 
     Ok(resp_json)
@@ -282,13 +282,13 @@ fn get_bangumi_name_from_json(json: Value, ep_id: &str) -> String {
     let ep_id = ep_id.parse::<i64>().unwrap();
     let ep_id_index: usize = json["result"]["episodes"]
         .as_array()
-        .unwrap()
+        .unwrap_or(&std::vec::Vec::new())
         .iter()
         .position(|episode| episode["ep_id"].as_i64().unwrap_or(0) == ep_id)
         .unwrap_or(0);
     let bangumi_name = json["result"]["episodes"][ep_id_index]["share_copy"]
         .as_str()
-        .unwrap();
+        .unwrap_or("");
     bangumi_name.to_string()
 }
 
@@ -297,13 +297,13 @@ fn get_bangumi_pic(json: Value, ep_id: &str) -> String {
     let ep_id = ep_id.parse::<i64>().unwrap();
     let ep_id_index: usize = json["result"]["episodes"]
         .as_array()
-        .unwrap()
+        .unwrap_or(&std::vec::Vec::new())
         .iter()
         .position(|episode| episode["ep_id"].as_i64().unwrap_or(0) == ep_id)
         .unwrap_or(0);
     let bangumi_pic = json["result"]["episodes"][ep_id_index]["cover"]
         .as_str()
-        .unwrap();
+        .unwrap_or("");
     bangumi_pic.to_string()
 }
 

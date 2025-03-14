@@ -163,7 +163,8 @@ async fn down_file_bv_(
     rsl: &str,
     bv_id: &str,
 ) -> Result<()> {
-    let (video_url, audio_url, qn) = get_bv_url(&url, rsl).unwrap();
+    let (video_url, audio_url, qn) =
+        get_bv_url(&url, rsl).unwrap_or((String::new(), String::new(), 0));
 
     let qn_c = resolution::qn(rsl);
     if qn != qn_c.parse::<i32>().unwrap() {

@@ -44,6 +44,14 @@ pub fn get_epid_season(url: &str) -> Result<Video> {
             season_id: String::new(),
             bv_id,
         })
+    } else if id.starts_with("bv") {
+        let bv_id = format!("BV{}", id.trim_start_matches("bv"));
+
+        Ok(Video {
+            ep_id: String::new(),
+            season_id: String::new(),
+            bv_id,
+        })
     } else {
         Err(anyhow::anyhow!(
             "URL does not contain valid episode, season ID or BV ID"
