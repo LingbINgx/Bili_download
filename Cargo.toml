@@ -34,3 +34,10 @@ scraper = "0.22.0"
 eframe = "0.29.0"
 egui_extras = { version = "*", features = ["all_loaders"] }
 image = { version = "0.25", features = ["jpeg", "png"] }
+
+
+[profile.release]
+opt-level = 'z'   # Optimize for size
+lto = true
+codegen-units = 1
+panic = 'abort'
